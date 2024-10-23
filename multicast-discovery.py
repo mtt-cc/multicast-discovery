@@ -60,20 +60,18 @@ def main():
                     f.write(f"{time.ctime()}: {addr} -> {message}\n")
                     f.flush()  # Ensure immediate writing to the file
 
-                    # If it's an announcement message and the host is not known
-                    if message == ANNOUNCEMENT_MSG and addr[0] not in known_hosts:
-                        # Add the host to the dictionary
+                    # If it's an announcement message or ack and the host is not known
+                    if (message == ANNOUNCEMENT_MSG or message == ACK_MSG):
+                        if addr[0] not in known_hosts:
+                            print(f"New host detected: {addr[0]}")
+                        # Add the host to the dictionary or update entry with the current time
                         known_hosts[addr[0]] = time.time()
-                        print(f"New host detected: {addr[0]}")
-
-                        # Send unicast announce_ack back to the new host
-                        ack_message = f"{ACK_MSG}"
-                        sock.sendto(ack_message.encode(), addr)
-                        print(f"Sent {ACK_MSG} to {addr[0]}")
-
-                    # If we receive an "announce_ack"
-                    elif message == ACK_MSG:
-                        print(f"Received {ACK_MSG} from {addr[0]}")
+                        
+                        if message == ANNOUNCEMENT_MSG:
+                            # Send unicast announce_ack back to host that announced itself
+                            ack_message = f"{ACK_MSG}"
+                            sock.sendto(ack_message.encode(), addr)
+                            print(f"Sent {ACK_MSG} to {addr[0]}")
 
                 except socket.timeout:
                     # No data received, just continue the loop to check for timeouts
