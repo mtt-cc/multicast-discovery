@@ -1,4 +1,4 @@
-## Reference for setting up vm
+## Reference for setting up
 
 ```
 sudo apt-get update
