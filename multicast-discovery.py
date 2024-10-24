@@ -104,6 +104,10 @@ def main():
                     break
 
     finally:
+        # print known hosts
+        print("Known hosts:")
+        for host in known_hosts.keys():
+            print(f"{host}")
         # Close the socket to release resources
         print("Closing socket...")
         sock.close()
