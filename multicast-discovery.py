@@ -33,6 +33,8 @@ def main():
 
     # Allow multiple sockets to use the same PORT number
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    # Disable multicast loopback
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 0)
 
     # Bind to the server address
     sock.bind(('', PORT))
