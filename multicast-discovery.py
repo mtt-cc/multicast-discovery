@@ -1,20 +1,31 @@
 import socket
 import struct
+import sys
 import time
 
 # Multicast group and port
-MULTICAST_GROUP = '224.1.1.1'  # Example multicast address
-PORT = 5004                   # Example port
+MULTICAST_GROUP = '224.1.1.1'
+PORT = 5004
 
 # Announcement messages
 ANNOUNCEMENT_MSG = "Hello, I'm here!"
 ACK_MSG = "announce_ack"
 
+# Time between announcements
+ANNOUNCE_TIME = 30
+# Time-to-live for known hosts (30 seconds)
+HOST_TTL = 30
+
 # Filename to save incoming messages
 FILENAME = 'received_messages.txt'
 
+# Buffer size for incoming messages
+BUF_SIZE = 1024*1024
+
+
+
 def main():
-    # Dictionary to store known hosts
+    # Dictionary to store known hosts with the time of last activity
     known_hosts = {}
 
     # Create the UDP socket
@@ -22,8 +33,6 @@ def main():
 
     # Allow multiple sockets to use the same PORT number
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    # Disable multicast loopback
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 0)
 
     # Bind to the server address
     sock.bind(('', PORT))
@@ -33,26 +42,35 @@ def main():
     mreq = struct.pack("4sl", socket.inet_aton(MULTICAST_GROUP), socket.INADDR_ANY)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
 
-    last_announce_time = time.time()  # Track the time of the last announcement
-
     try:
+        # Announce presence to others in the group
+        print("Sending announcement...")
+        sock.sendto(ANNOUNCEMENT_MSG.encode(), (MULTICAST_GROUP, PORT))
+
         # Open a file to save incoming messages
         with open(FILENAME, 'a') as f:
             print("Listening for messages...")
-            print("Sending announcement...")
-            sock.sendto(ANNOUNCEMENT_MSG.encode(), (MULTICAST_GROUP, PORT))
-            while True:
-                # Check if 30 seconds have passed since the last announcement
-                current_time = time.time()
-                if current_time - last_announce_time >= 30:
-                    print("Sending announcement...")
-                    sock.sendto(ANNOUNCEMENT_MSG.encode(), (MULTICAST_GROUP, PORT))
-                    last_announce_time = current_time  # Update the time of the last announcement
+            last_announcement_time = time.time()
 
-                # Use non-blocking receive to avoid blocking the announcement
-                sock.settimeout(1)  # Set a timeout of 1 second for receiving messages
+            while True:
+                # Announce every 30 seconds
+                current_time = time.time()
+                if current_time - last_announcement_time >= ANNOUNCE_TIME:
+                    print("Sending periodic announcement...")
+                    sock.sendto(ANNOUNCEMENT_MSG.encode(), (MULTICAST_GROUP, PORT))
+                    last_announcement_time = current_time
+
+                # Remove expired hosts
+                expired_hosts = [host for host, last_seen in known_hosts.items() 
+                                 if current_time - last_seen > HOST_TTL]
+                for host in expired_hosts:
+                    print(f"Removing expired host: {host}")
+                    del known_hosts[host]
+
+                # Check for incoming messages with a 1-second timeout
+                sock.settimeout(1)
                 try:
-                    data, addr = sock.recvfrom(1024*1024)  # Buffer size is 1MB
+                    data, addr = sock.recvfrom(BUF_SIZE)  # Buffer size is 1024 bytes
                     message = data.decode()
                     print(f"Received message from {addr}: {message}")
 
@@ -60,23 +78,27 @@ def main():
                     f.write(f"{time.ctime()}: {addr} -> {message}\n")
                     f.flush()  # Ensure immediate writing to the file
 
-                    # If it's an announcement message or ack and the host is not known
-                    if (message == ANNOUNCEMENT_MSG or message == ACK_MSG):
+                    # If it's an announcement message and the host is not known
+                    if message == ANNOUNCEMENT_MSG:
+                        # Update or add the host with the current timestamp
+                        known_hosts[addr[0]] = current_time
                         if addr[0] not in known_hosts:
                             print(f"New host detected: {addr[0]}")
-                        # Add the host to the dictionary or update entry with the current time
-                        known_hosts[addr[0]] = time.time()
-                        
-                        if message == ANNOUNCEMENT_MSG:
-                            # Send unicast announce_ack back to host that announced itself
-                            ack_message = f"{ACK_MSG}"
-                            sock.sendto(ack_message.encode(), addr)
-                            print(f"Sent {ACK_MSG} to {addr[0]}")
+
+                        # Send unicast announce_ack back to the new host
+                        ack_message = f"{ACK_MSG}"
+                        sock.sendto(ack_message.encode(), addr)
+                        print(f"Sent {ACK_MSG} to {addr[0]}")
+
+                    # If we receive an "announce_ack"
+                    elif message == ACK_MSG:
+                        print(f"Received {ACK_MSG} from {addr[0]}")
+                        # Update the timestamp for the responding host
+                        known_hosts[addr[0]] = current_time
 
                 except socket.timeout:
-                    # No data received, just continue the loop to check for timeouts
+                    # Timeout after 1 second, continue the loop to send announcements or check for expiration
                     pass
-
                 except KeyboardInterrupt:
                     print("\nExiting...")
                     break
@@ -85,12 +107,6 @@ def main():
         # Close the socket to release resources
         print("Closing socket...")
         sock.close()
-
-        print("Known hosts:")
-        for elem in known_hosts.keys():
-            print(elem)
-
-        exit(0)
 
 if __name__ == "__main__":
     main()
